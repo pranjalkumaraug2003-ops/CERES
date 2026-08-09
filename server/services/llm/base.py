@@ -92,6 +92,16 @@ class ProviderAuthError(ProviderError):
     cooldown = 600.0
 
 
+class ProviderPaymentRequired(ProviderError):
+    """402. Out of credit / billing not enabled (Cerebras returns this when the
+    free tier isn't active; DeepSeek returns it as 'Insufficient Balance').
+
+    Treated like auth, NOT like a rate limit: no amount of waiting fixes an
+    empty balance, so bench it for a long time instead of retrying every 30s."""
+
+    cooldown = 1800.0
+
+
 class ProviderBadRequest(ProviderError):
     """400. WE built a malformed payload — every other provider will reject it
     too. Failing over would just multiply the same error, so don't."""
@@ -111,6 +121,8 @@ def classify_http_error(status: int, body: str, provider: str) -> ProviderError:
     snippet = body[:400].replace("\n", " ")
     if status in (401, 403):
         return ProviderAuthError(f"{provider} auth rejected ({status}): {snippet}", provider)
+    if status == 402:
+        return ProviderPaymentRequired(f"{provider} out of credit (402): {snippet}", provider)
     if status == 429:
         return ProviderRateLimited(f"{provider} rate limited (429): {snippet}", provider)
     if status == 400:

@@ -193,7 +193,7 @@ class CerebrasProvider(OpenAICompatProvider):
     """Free tier, and among the fastest hosted inference available."""
 
     name = "cerebras"
-    model = "llama-3.3-70b"
+    model = "gpt-oss-120b"  # verified via /v1/models; only 3 offered
     api_key_env = "CEREBRAS_API_KEY"
     base_url = "https://api.cerebras.ai/v1"
 
@@ -204,7 +204,7 @@ class DeepSeekProvider(OpenAICompatProvider):
     substitute when a provider demands a large upfront commitment."""
 
     name = "deepseek"
-    model = "deepseek-chat"
+    model = "deepseek-v4-flash"  # verified via /v1/models
     api_key_env = "DEEPSEEK_API_KEY"
     base_url = "https://api.deepseek.com/v1"
 
