@@ -269,7 +269,19 @@ def parse_tool_arguments(raw: str, tool_name: str = "") -> Dict[str, Any]:
         return {}
     try:
         parsed = json.loads(raw)
-        return parsed if isinstance(parsed, dict) else {"value": parsed}
     except json.JSONDecodeError:
         logger.warning(f"[Translate] Could not parse tool arguments for '{tool_name}': {raw[:200]}")
         return {}
+
+    if isinstance(parsed, dict):
+        return parsed
+
+    # Valid JSON but not an object — models sometimes emit `null` or `""` for a
+    # zero-parameter tool. Return {} rather than inventing a key: tool functions
+    # take named parameters, so a synthetic {"value": ...} is guaranteed to blow
+    # up as an unexpected keyword argument.
+    logger.warning(
+        f"[Translate] Tool '{tool_name}' returned non-object arguments "
+        f"({type(parsed).__name__}); treating as no arguments."
+    )
+    return {}
