@@ -1,0 +1,30 @@
+.env
+__pycache__/
+node_modules/
+*.pyc
+.qdrant/
+postgres_data/
+redis_data/
+
+# Secrets / OAuth
+server/credentials.json
+server/token.json
+credentials.json
+token.json
+
+# Biometric data
+data/face_encodings.json
+
+# Python virtualenv
+server/venv/
+venv/
+
+# Conversation checkpoints / logs (may contain personal data)
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+server/logs/
+
+# Build output
+client/dist/
+.vite/
