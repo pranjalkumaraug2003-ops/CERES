@@ -7,6 +7,25 @@ class NarrationUnsupported(Exception):
     """Raised when a tool result cannot be narrated by template and needs LLM fallback."""
     pass
 
+
+# Tools whose own `summary` is already a well-formed spoken sentence, so an LLM
+# call to rephrase it is pure waste — every one of these was previously costing a
+# SECOND API request per query on top of the tool-decision call.
+#
+# e.g. get_unread_emails already returns:
+#   "You have 3 unread emails. The latest is from Alice: 'Q3 numbers'."
+#
+# Deliberately NOT listed: search_web (a raw "Found 5 results" is a useless
+# spoken answer — the snippets genuinely need synthesizing) and
+# run_shell_command with real output (arbitrary stdout needs interpreting).
+# Those two keep the LLM fallback, which is where it actually earns its cost.
+SUMMARY_IS_SPEAKABLE = {
+    "send_email",
+    "get_unread_emails",
+    "get_calendar_events",
+    "delete_file",
+}
+
 def narrate(tool_name: str, result: Any) -> Optional[str]:
     """Generates a natural-sounding spoken response directly from a tool's result data.
     
@@ -156,7 +175,23 @@ def narrate(tool_name: str, result: Any) -> Optional[str]:
             logger.info(f"[NarrationEngine] Template matched for '{tool_name}': '{res_text}'")
             return res_text
 
-        # Unsupported tools get routed to Gemini narration
+        elif tool_name == "run_shell_command":
+            # Only narrate the trivial case. A command that produced real output
+            # needs interpreting, which is a legitimate use of the LLM.
+            stdout = str(data.get("stdout", "") or "").strip()
+            if not stdout:
+                return "Command completed with no output."
+            logger.info(
+                f"[NarrationEngine] '{tool_name}' produced output; using LLM to interpret it."
+            )
+            return None
+
+        # Tools whose own summary is already voice-ready — no LLM needed.
+        if tool_name in SUMMARY_IS_SPEAKABLE and summary:
+            logger.info(f"[NarrationEngine] Using tool summary verbatim for '{tool_name}'.")
+            return summary
+
+        # Unsupported tools get routed to LLM narration
         logger.info(f"[NarrationEngine] Tool '{tool_name}' has no template; falling back to LLM.")
         return None
 
