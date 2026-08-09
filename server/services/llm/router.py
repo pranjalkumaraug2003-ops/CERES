@@ -32,11 +32,14 @@ from server.services.llm.base import LLMProvider, ProviderError, ProviderUnavail
 from server.services.llm.gemini import GeminiProProvider, GeminiProvider
 from server.services.llm.openai_compat import (
     CerebrasProvider,
+    DeepSeekProvider,
+    GitHubModelsProvider,
     GroqProvider,
     MistralProvider,
     OllamaProvider,
     OpenAIProvider,
     OpenRouterProvider,
+    TogetherProvider,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,14 +49,21 @@ PROVIDER_REGISTRY = {
     "gemini-pro": GeminiProProvider,
     "groq": GroqProvider,
     "openrouter": OpenRouterProvider,
+    "cerebras": CerebrasProvider,
+    "github-models": GitHubModelsProvider,
+    "deepseek": DeepSeekProvider,
+    "together": TogetherProvider,
+    "mistral": MistralProvider,
     "openai": OpenAIProvider,
     "anthropic": AnthropicProvider,
-    "cerebras": CerebrasProvider,
-    "mistral": MistralProvider,
     "ollama": OllamaProvider,
 }
 
-DEFAULT_CHAIN = "gemini,groq,openrouter"
+# Free-tier-first ordering: Groq and Cerebras both have usable free tiers and
+# are the fastest hosted options (which matters most for voice), with OpenRouter
+# as a cheap prepaid catch-all that can also serve Gemini models. `gemini` stays
+# in the chain so it takes over automatically once a key is available.
+DEFAULT_CHAIN = "groq,cerebras,openrouter,gemini"
 
 #: Per-provider model override, e.g. GROQ_MODEL=llama-3.1-8b-instant
 MODEL_ENV_TEMPLATE = "{}_MODEL"

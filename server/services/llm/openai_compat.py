@@ -190,10 +190,49 @@ class OpenAIProvider(OpenAICompatProvider):
 
 
 class CerebrasProvider(OpenAICompatProvider):
+    """Free tier, and among the fastest hosted inference available."""
+
     name = "cerebras"
     model = "llama-3.3-70b"
     api_key_env = "CEREBRAS_API_KEY"
     base_url = "https://api.cerebras.ai/v1"
+
+
+class DeepSeekProvider(OpenAICompatProvider):
+    """Among the cheapest capable models on the market by a wide margin, with
+    solid tool calling. Pay-as-you-go with a small minimum top-up — a practical
+    substitute when a provider demands a large upfront commitment."""
+
+    name = "deepseek"
+    model = "deepseek-chat"
+    api_key_env = "DEEPSEEK_API_KEY"
+    base_url = "https://api.deepseek.com/v1"
+
+
+class TogetherProvider(OpenAICompatProvider):
+    """Together.ai — free starting credits, then cheap per-token. Wide open-model
+    selection; pick a tool-calling-capable one (Llama 3.3 / Qwen)."""
+
+    name = "together"
+    model = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+    api_key_env = "TOGETHER_API_KEY"
+    base_url = "https://api.together.xyz/v1"
+
+
+class GitHubModelsProvider(OpenAICompatProvider):
+    """GitHub Models — free with any GitHub account (rate-limited), and included
+    in the GitHub Student Developer Pack. Authenticates with a normal PAT, so
+    there is no billing setup at all.
+
+    NOTE: GitHub has moved this endpoint before. If you get a 404, check the
+    current base URL and override it with GITHUB_MODELS_BASE_URL rather than
+    editing this file.
+    """
+
+    name = "github-models"
+    model = "gpt-4o-mini"
+    api_key_env = "GITHUB_MODELS_TOKEN"
+    base_url = "https://models.github.ai/inference"
 
 
 class MistralProvider(OpenAICompatProvider):
