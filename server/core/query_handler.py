@@ -39,6 +39,12 @@ SYSTEM_INSTRUCTION = (
     "When you run a tool, summarize its results briefly and confirm actions completion naturally."
 )
 
+# Cap on the tool-decision / conversational turn. Required, not just tidy:
+# some gateways (OpenRouter) price a request by the max_tokens you ASK for, and
+# reject with 402 if your balance can't cover the model's full ceiling. CERES
+# speaks in short sentences, so this is generous.
+MAX_DECISION_TOKENS = 2048
+
 # Separate, much tighter system prompt ONLY for narrating tool results.
 # This is the single biggest latency optimization: forces 1-3 sentence responses
 # instead of 10-20 sentence explanations.
@@ -80,6 +86,20 @@ def prune_tools(intent: str) -> Optional[List[Dict[str, Any]]]:
     return pruned
 
 
+async def _emit_error(
+    ws_emit: Callable[[WSMessageType, str, str, Any], Any],
+    message: str,
+) -> None:
+    """Report an error AND close the stream.
+
+    Every error path used to emit ERROR and return without a STREAM_END, so the
+    client sat waiting for a completion event that never came — one failed query
+    hung the UI indefinitely. STREAM_END is the only signal the turn is over.
+    """
+    await ws_emit(WSMessageType.ERROR, message, "System")
+    await ws_emit(WSMessageType.STREAM_END, "Complete.", "System")
+
+
 async def handle_query(
     query: str,
     thread_id: str,
@@ -112,7 +132,7 @@ async def handle_query(
             await _resume_tool_execution(approved_payload, thread_id, ws_emit, trace, generation_id)
         except Exception as e:
             logger.error(f"[QueryHandler] Resume failed: {e}", exc_info=True)
-            await ws_emit(WSMessageType.ERROR, f"Resume failed: {e}", "System")
+            await _emit_error(ws_emit, f"Resume failed: {e}")
         finally:
             _cleanup_generation_state(request_id, trace)
         return
@@ -277,12 +297,13 @@ async def handle_query(
                     contents=contents,
                     system_instruction=SYSTEM_INSTRUCTION,
                     tools=pruned_tools,
+                    max_output_tokens=MAX_DECISION_TOKENS,
                     buffered=True
                 )
                 
                 async for event_type, data in generator:
                     if event_type == "error":
-                        await ws_emit(WSMessageType.ERROR, data, "System")
+                        await _emit_error(ws_emit, data)
                         trace.metadata["intent"] = "llm_error"
                         trace.finish(error=data)
                         return
@@ -293,7 +314,7 @@ async def handle_query(
                         break
             except Exception as e:
                 logger.error(f"[QueryHandler] Gemini request failed: {e}", exc_info=True)
-                await ws_emit(WSMessageType.ERROR, f"Reasoning engine failed: {e}", "System")
+                await _emit_error(ws_emit, f"Reasoning engine failed: {e}")
                 trace.metadata["intent"] = "llm_exception"
                 trace.finish(error=str(e))
                 return
@@ -367,7 +388,7 @@ async def handle_query(
     except Exception as e:
         logger.error(f"[QueryHandler] Unhandled exception in request {request_id}: {e}", exc_info=True)
         try:
-            await ws_emit(WSMessageType.ERROR, f"Internal error: {e}", "System")
+            await _emit_error(ws_emit, f"Internal error: {e}")
         except Exception:
             pass  # WebSocket may already be dead
         trace.metadata["unhandled_error"] = str(e)
@@ -403,7 +424,7 @@ async def _resume_tool_execution(
     pending = _pending_confirmations.pop(thread_id, None)
     if not pending:
         logger.warning(f"[QueryHandler] No pending tool confirmation found for thread: {thread_id}")
-        await ws_emit(WSMessageType.ERROR, "No pending action found to resume.", "System")
+        await _emit_error(ws_emit, "No pending action found to resume.")
         return
 
     tool_name = pending["tool_name"]
@@ -499,7 +520,7 @@ async def _narrate_tool_result(
                 full_text = await pipeline.consume_token_stream(_template_token_generator())
         except Exception as e:
             logger.error(f"[QueryHandler] Template narration streaming failed: {e}", exc_info=True)
-            await ws_emit(WSMessageType.ERROR, f"Narration streaming failed: {e}", "System")
+            await _emit_error(ws_emit, f"Narration streaming failed: {e}")
             trace.finish(error=str(e))
             return
             
@@ -535,7 +556,7 @@ async def _narrate_tool_result(
                     full_text = await pipeline.consume_token_stream(_narration_token_generator())
             except Exception as e:
                 logger.error(f"[QueryHandler] Gemini narration failed: {e}", exc_info=True)
-                await ws_emit(WSMessageType.ERROR, f"Narration synthesis failed: {e}", "System")
+                await _emit_error(ws_emit, f"Narration synthesis failed: {e}")
                 trace.finish(error=str(e))
                 return
         
