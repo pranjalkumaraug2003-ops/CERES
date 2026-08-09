@@ -14,7 +14,7 @@ from server.core.streaming_pipeline import StreamingPipeline
 from server.core.task_manager import spawn_background_task
 from server.core.narration_engine import narrate
 
-from server.services.gemini_service import GeminiService
+from server.services.llm import get_router
 from server.services.command_history_service import log_command
 from server.services.memory_service import run_memory_extraction
 from server.services.local_router_service import check_reflex, classify_intent
@@ -26,8 +26,9 @@ from server.shared.ws_protocol import WSMessageType
 
 logger = logging.getLogger(__name__)
 
-# Direct singleton Gemini REST service client
-gemini_client = GeminiService()
+# Multi-provider router with automatic failover (Gemini -> Groq -> ... ).
+# Same generate_stream() contract the old GeminiService exposed.
+gemini_client = get_router()
 
 # Global registry for active queries awaiting confirmation
 _pending_confirmations: Dict[str, Dict[str, Any]] = {}
@@ -268,10 +269,15 @@ async def handle_query(
 
         with trace.span("gemini_tool_decision"):
             try:
+                # buffered=True: these tokens are collected into text_tokens and
+                # only streamed later, so nothing has reached the user yet. That
+                # lets the router fail over even on a late failure, with no risk
+                # of duplicating spoken output.
                 generator = gemini_client.generate_stream(
                     contents=contents,
                     system_instruction=SYSTEM_INSTRUCTION,
-                    tools=pruned_tools
+                    tools=pruned_tools,
+                    buffered=True
                 )
                 
                 async for event_type, data in generator:

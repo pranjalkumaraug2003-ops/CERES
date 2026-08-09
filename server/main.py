@@ -108,11 +108,11 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     try:
-        from server.services.gemini_service import close_gemini_client
+        from server.services.llm import close_http_client as close_llm_client
         from server.services.redis_service import close_redis_client
         from server.services.weather_service import close_weather_client
         from server.services.voice_service import close_tts_client
-        await close_gemini_client()
+        await close_llm_client()
         await close_redis_client()
         await close_weather_client()
         await close_tts_client()
@@ -153,7 +153,14 @@ async def resume_graph(thread_id: str, request: ResumeRequest):
 @app.get("/health")
 async def health():
     gemini_status = "configured" if os.getenv("GOOGLE_API_KEY") else "missing"
-    
+
+    # Which providers are configured, and which are benched by the breaker.
+    try:
+        from server.services.llm import get_router
+        llm_status = get_router().status()
+    except Exception as e:
+        llm_status = {"error": str(e)}
+
     # Qdrant Check
     try:
         from server.services.qdrant_service import get_qdrant_client
@@ -188,13 +195,13 @@ async def health():
 
     return {
         "status": "ok",
-        "legacy_mode": False,
         "subsystems": {
             "gemini": gemini_status,
             "qdrant": qdrant_status,
             "tts": tts_status,
             "whisper": whisper_status
-        }
+        },
+        "llm": llm_status
     }
 
 # Include routers
