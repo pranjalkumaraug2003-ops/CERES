@@ -3,10 +3,15 @@ import logging
 import time
 from datetime import datetime
 from server.services.profile_service import get_profile
-from server.services.qdrant_service import search_memory
+from server.services.qdrant_service import is_qdrant_configured, search_memory
 from server.core.security import ContextEnvelope
 
 logger = logging.getLogger(__name__)
+
+# Hard ceiling on the memory lookup. Long-term memory is a nice-to-have on any
+# single turn; making the user wait for it is not. If Qdrant can't answer in
+# this long, we proceed without memories rather than stall the reply.
+MEMORY_SEARCH_TIMEOUT = 1.5
 
 # Query-specific memory cache: clean_query -> (timestamp, memories_list)
 _memory_cache = {}
@@ -35,6 +40,11 @@ async def build_context(query: str, request_id: str) -> ContextEnvelope:
     clean_query = query.lower().strip()
 
     async def _fetch_memories():
+        # Nothing to search, and attempting it costs seconds in refused-
+        # connection retries against the localhost default.
+        if not is_qdrant_configured():
+            return None
+
         now = time.time()
         if clean_query in _memory_cache:
             ts, cached_mem = _memory_cache[clean_query]
@@ -42,9 +52,17 @@ async def build_context(query: str, request_id: str) -> ContextEnvelope:
                 logger.debug(f"[ContextManager] Memory cache hit for: '{clean_query}'")
                 return cached_mem
         try:
-            mems = await search_memory(query, limit=3)
+            mems = await asyncio.wait_for(
+                search_memory(query, limit=3), timeout=MEMORY_SEARCH_TIMEOUT
+            )
             _memory_cache[clean_query] = (now, mems)
             return mems
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"[ContextManager] Memory search exceeded {MEMORY_SEARCH_TIMEOUT}s; "
+                f"continuing without long-term memory."
+            )
+            return None
         except Exception as e:
             logger.warning(f"[ContextManager] Failed to fetch Qdrant memories: {e}")
             return None

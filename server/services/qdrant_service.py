@@ -12,6 +12,17 @@ import asyncio
 
 _qdrant_client: Optional[AsyncQdrantClient] = None
 
+def is_qdrant_configured() -> bool:
+    """True only if QDRANT_URL is set.
+
+    Worth checking before every search: with no URL the client silently falls
+    back to localhost:6333, and the refused-connection retries cost ~2.4s. On a
+    voice assistant that dead time is the difference between feeling instant and
+    feeling broken, so callers skip the search entirely instead of paying it.
+    """
+    return bool(os.getenv("QDRANT_URL"))
+
+
 def get_qdrant_client() -> AsyncQdrantClient:
     global _qdrant_client
     if _qdrant_client is None:
