@@ -201,8 +201,18 @@ async def health():
             "tts": tts_status,
             "whisper": whisper_status
         },
-        "llm": llm_status
+        "llm": llm_status,
+        "semantic_cache": _semantic_cache_stats()
     }
+
+
+def _semantic_cache_stats():
+    """Hit rate is the number to watch — it maps directly to API calls avoided."""
+    try:
+        from server.core.semantic_cache import semantic_cache
+        return semantic_cache.stats()
+    except Exception as e:
+        return {"error": str(e)}
 
 # Include routers
 from server.api.auth import router as auth_router
