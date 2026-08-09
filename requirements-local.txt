@@ -1,0 +1,28 @@
+# CERES — optional on-device models. Python 3.12, CPU-only (no GPU required).
+#
+#   server/venv/Scripts/pip install -r requirements-local.txt
+#
+# Every package here is imported lazily or behind a try/except, so the backend
+# runs fine without any of them — you just fall back to the cloud path or lose
+# the face-auth gate. Install only what you actually want running locally.
+#
+# These are all *pre-trained* models used for inference. Nothing here is trained
+# or fine-tuned locally, and none of it needs a GPU.
+
+# ── Local speech-to-text — USE_LOCAL_STT=true ─────────────────────────────────
+# whisper_service.py loads small.en / int8 on first use.
+faster-whisper==1.2.1
+
+# ── Local text-to-speech — USE_LOCAL_TTS=true ─────────────────────────────────
+kokoro==0.9.4
+soundfile==0.13.1
+
+# ── Face-auth login gate ──────────────────────────────────────────────────────
+# face_auth_service.py degrades gracefully if these are missing.
+# Enrol a face with: python -m server.utils.register_face
+opencv-python==4.13.0.92
+face-recognition==1.3.0
+# dlib ships no official Windows wheel and building it needs CMake + MSVC build
+# tools. This prebuilt cp312/win_amd64 wheel is the one this venv was built with;
+# on Linux/macOS replace it with plain `dlib==19.24.99`.
+dlib @ https://github.com/z-mahmud22/Dlib_Windows_Python3.x/raw/main/dlib-19.24.99-cp312-cp312-win_amd64.whl
