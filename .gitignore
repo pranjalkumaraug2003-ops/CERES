@@ -15,6 +15,9 @@ token.json
 # Biometric data
 data/face_encodings.json
 
+# Semantic cache — contains verbatim user queries and CERES's replies
+data/semantic_cache.json
+
 # Python virtualenv
 server/venv/
 venv/

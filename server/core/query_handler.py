@@ -9,7 +9,7 @@ from server.core.event_bus import event_bus
 from server.core.tracer import Trace
 from server.core.context_manager import build_context
 from server.core.security import detect_and_sanitize_injection
-from server.core.semantic_cache import semantic_cache
+from server.core.semantic_cache import bucket_for_tool, semantic_cache
 from server.core.streaming_pipeline import StreamingPipeline
 from server.core.task_manager import spawn_background_task
 from server.core.narration_engine import narrate
@@ -547,17 +547,12 @@ async def _narrate_tool_result(
     trace.metadata["total_perceived"] = time.time() - trace.start_time
     trace.metadata["tool_result_status"] = result.status
     
-    # Store result in semantic cache ONLY if successful
+    # Store result in semantic cache ONLY if successful. bucket_for_tool routes
+    # side-effecting tools to a never-cached bucket — otherwise a cached
+    # "Opening Notepad now." would be replayed on the next ask WITHOUT actually
+    # opening anything, since the cache is checked before tool execution.
     if result.status == "success" and full_text:
-        bucket = "help"
-        if tool_name == "get_weather":
-            bucket = "weather"
-        elif tool_name == "get_system_stats":
-            bucket = "system_stats"
-        elif tool_name == "create_reminder":
-            bucket = "time_date"
-            
-        semantic_cache.set(query, full_text, bucket)
+        semantic_cache.set(query, full_text, bucket_for_tool(tool_name))
 
     # Trigger background operations
     spawn_background_task(log_command(thread_id, query, full_text, tool_name, engine_type, trace.metadata["total_perceived"]))
