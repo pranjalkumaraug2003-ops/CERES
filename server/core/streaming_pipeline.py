@@ -17,6 +17,15 @@ _SENTENCE_BOUNDARY = re.compile(
 )
 _FALLBACK_BOUNDARY = re.compile(r'(?<=[.!?])\s+')
 
+# Partial-commit thresholds (characters). The first chunk is deliberately small
+# so speech STARTS fast; later chunks are larger so the voice doesn't sound
+# chopped up. Local TTS synthesis time scales roughly with text length, so this
+# trades a slightly shorter opening phrase for a much lower time-to-first-audio.
+_FIRST_CHUNK_CHARS = 28
+_FIRST_CHUNK_MIN_SPLIT = 12
+_CHUNK_CHARS = 60
+_CHUNK_MIN_SPLIT = 30
+
 
 class StreamingPipeline:
     """Processes streamed text tokens from the LLM, groups them into sentences,
@@ -79,14 +88,26 @@ class StreamingPipeline:
                     if sentence:
                         # Enforce backpressure block
                         await self.sentence_queue.put(sentence)
-                elif len(buffer) >= 60:
-                    # Partial commit: split at the last safe separator (space or comma) to start TTS early
-                    split_idx = max(buffer.rfind(" "), buffer.rfind(","))
-                    if split_idx > 30:
-                        sentence = buffer[:split_idx].strip()
-                        buffer = buffer[split_idx:].strip()
-                        if sentence:
-                            await self.sentence_queue.put(sentence)
+                else:
+                    # Partial commit: split at the last safe separator to start TTS early.
+                    #
+                    # The FIRST chunk uses a much smaller threshold than the rest.
+                    # Time-to-first-audio dominates how responsive CERES feels, and
+                    # local Kokoro synthesis time scales with text length — so a
+                    # short opening phrase gets audio playing seconds sooner, while
+                    # later chunks stay long enough to sound natural (and have the
+                    # first chunk's playback time to be synthesized in).
+                    is_first = self.sentence_idx == 0 and self._t_first_audio == 0.0
+                    commit_at = _FIRST_CHUNK_CHARS if is_first else _CHUNK_CHARS
+                    min_split = _FIRST_CHUNK_MIN_SPLIT if is_first else _CHUNK_MIN_SPLIT
+
+                    if len(buffer) >= commit_at:
+                        split_idx = max(buffer.rfind(" "), buffer.rfind(","))
+                        if split_idx > min_split:
+                            sentence = buffer[:split_idx].strip()
+                            buffer = buffer[split_idx:].strip()
+                            if sentence:
+                                await self.sentence_queue.put(sentence)
 
             # Flush residual text buffer at end of stream
             if buffer.strip() and runtime_state.current_generation == self.generation_id:
