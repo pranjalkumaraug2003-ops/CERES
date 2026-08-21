@@ -52,8 +52,37 @@ export const initialCeresState: CeresState = {
   error: null,
 }
 
+// States that must ALWAYS be able to interrupt, even mid-lock — a failure or a
+// user interrupt outranks any animation debounce.
+const LOCK_EXEMPT: OrbState[] = ['ERROR', 'INTERRUPTING']
+
 function withState(state: CeresState, orbState: OrbState, extra: Partial<CeresState> = {}): CeresState {
   const now = Date.now()
+
+  // transitionLockUntil was previously computed here and then never read
+  // anywhere, so the anti-flap debounce did nothing — competing events
+  // (tts_start vs AUDIO_STARTED, AUDIO_FINISHED vs a late tts_chunk) could
+  // each retrigger a transition and the orb would visibly overlap LISTENING /
+  // IDLE / SPEAKING. Now it is actually enforced.
+  const locked = now < state.transitionLockUntil
+  const isSameState = state.orbState === orbState
+  const isExempt = LOCK_EXEMPT.includes(orbState)
+
+  if (locked && !isSameState && !isExempt) {
+    // Honour the payload (ids, flags) but suppress the visual state flip.
+    return { ...state, ...extra }
+  }
+
+  // Re-entering the same state shouldn't restart the entry animation or extend
+  // the lock; that was another source of visual stutter during token streaming.
+  if (isSameState) {
+    return {
+      ...state,
+      ...extra,
+      visualIntensity: Math.max(state.visualIntensity, stateBaseIntensity[orbState]),
+    }
+  }
+
   return {
     ...state,
     ...extra,
@@ -62,7 +91,11 @@ function withState(state: CeresState, orbState: OrbState, extra: Partial<CeresSt
     stateEnteredAt: now,
     transitionLockUntil: now + (LOCK_MS[orbState] ?? 0),
     entryEffect: stateEntryEffect[orbState],
-    visualIntensity: Math.max(state.visualIntensity, stateBaseIntensity[orbState]),
+    // Snap to the new state's baseline rather than Math.max-ing against the old
+    // one. Math.max meant intensity only ever ratcheted UP — going SPEAKING
+    // (0.58) -> IDLE (0.16) kept 0.58 forever, so the orb never visually
+    // settled and looked permanently "active".
+    visualIntensity: stateBaseIntensity[orbState],
   }
 }
 
@@ -142,7 +175,11 @@ export function ceresReducer(state: CeresState, action: CeresAction): CeresState
         return withState(nextBase, 'SPEAKING', { isPlaying: true, events: [...state.events, event] })
       }
       if (event.type === 'tts_chunk') {
-        return { ...nextBase, isPlaying: true }
+        // Audio is arriving, so we ARE speaking. Previously this only set
+        // isPlaying and left orbState alone, so a chunk landing after
+        // AUDIO_FINISHED (or before tts_start) left the orb showing IDLE while
+        // sound played — the IDLE/SPEAKING overlap.
+        return withState(nextBase, 'SPEAKING', { isPlaying: true })
       }
       if (event.type === 'stream_end') {
         return { ...nextBase, events: [...state.events, event] }
@@ -176,8 +213,24 @@ export function ceresReducer(state: CeresState, action: CeresAction): CeresState
     case 'AUDIO_CHUNK_RECEIVED':
       if (isStale(state, action)) return state
       return { ...state, isPlaying: true, generationId: action.generationId ?? state.generationId }
-    case 'AUDIO_AMPLITUDE':
-      return { ...state, audioAmplitude: action.amplitude, visualIntensity: Math.max(state.visualIntensity, 0.2 + action.amplitude * 0.7) }
+    case 'AUDIO_AMPLITUDE': {
+      // Same Math.max ratchet problem: intensity could only climb, so once a
+      // loud syllable pushed it up it never came back down. Track the live
+      // amplitude against the current state's baseline instead.
+      const amplitudeIntensity = 0.2 + action.amplitude * 0.7
+      const baseline = stateBaseIntensity[state.orbState]
+      const nextIntensity = Math.max(baseline, amplitudeIntensity)
+      // Skip the update entirely when nothing meaningfully moved — this
+      // dispatch fires every animation frame during speech, and each new state
+      // object re-renders every store subscriber.
+      if (
+        Math.abs(state.audioAmplitude - action.amplitude) < 0.01 &&
+        Math.abs(state.visualIntensity - nextIntensity) < 0.01
+      ) {
+        return state
+      }
+      return { ...state, audioAmplitude: action.amplitude, visualIntensity: nextIntensity }
+    }
     case 'AUDIO_FINISHED':
       if (isStale(state, action)) return state
       return withState(state, 'IDLE', { isPlaying: false, audioAmplitude: 0, interactionId: null, generationId: null })

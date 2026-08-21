@@ -46,9 +46,12 @@ export const useCeresStore = create<CeresStore>((set, get) => {
     if (action.type === 'STREAM_EVENT') {
       const event = action.event
       if (event.type === 'tts_start') {
-        const ids = extractIds(event)
+        // Side effect only. We deliberately do NOT dispatch TTS_START here:
+        // the STREAM_EVENT falls through to the reducer below, which already
+        // handles 'tts_start' -> SPEAKING. Doing both ran two transitions per
+        // event, restarting the entry animation mid-flight and making the orb
+        // visibly stutter between states.
         audioEngine?.flushOnly()
-        set(state => reduceCeresState(state, { type: 'TTS_START', ...ids }))
       }
       if (event.type === 'tts_chunk') {
         const audioBase64 = event.data?.audio_base64
