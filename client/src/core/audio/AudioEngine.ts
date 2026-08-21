@@ -14,6 +14,8 @@ export class AudioEngine {
   private isLooping = false
   private activeInteractionId: string | null = null
   private activeGenerationId: string | null = null
+  private lastAmplitudeAt = 0
+  private lastAmplitude = -1
 
   constructor(dispatch: CeresDispatch) {
     this.dispatch = dispatch
@@ -64,13 +66,30 @@ export class AudioEngine {
     if (this.isLooping) return
     this.isLooping = true
     RenderScheduler.subscribe('audio-amplitude', () => {
-      this.dispatch({ type: 'AUDIO_AMPLITUDE', amplitude: this.queue.getAmplitude() })
+      const amplitude = this.queue.getAmplitude()
+      const now = performance.now()
+
+      // Throttle to ~20Hz and ignore imperceptible changes. This used to
+      // dispatch on every animation frame (60Hz), and each dispatch produced a
+      // new store object that re-rendered every subscriber — 60 full re-renders
+      // per second for the entire duration of every spoken reply. 20Hz is still
+      // smoother than the eye resolves for a glow/pulse effect.
+      if (now - this.lastAmplitudeAt < 50) return
+      if (Math.abs(amplitude - this.lastAmplitude) < 0.01) return
+
+      this.lastAmplitudeAt = now
+      this.lastAmplitude = amplitude
+      this.dispatch({ type: 'AUDIO_AMPLITUDE', amplitude })
     })
   }
 
   private stopAmplitudeLoop() {
     if (!this.isLooping) return
     this.isLooping = false
+    // Reset the throttle baseline so the next playback session isn't
+    // suppressed by a stale "unchanged amplitude" comparison.
+    this.lastAmplitude = -1
+    this.lastAmplitudeAt = 0
     RenderScheduler.unsubscribe('audio-amplitude')
   }
 }
