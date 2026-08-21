@@ -50,17 +50,38 @@ def narrate(tool_name: str, result: Any) -> Optional[str]:
 
     try:
         if tool_name == "get_weather":
-            # Example template for weather tool
-            # Data keys: location, temperature, feels_like, humidity, windspeed, condition
             loc = data.get("location", "the requested location")
+            forecast_days = data.get("forecast_days_requested", 1)
+            daily = data.get("daily_forecast") or []
+
+            # forecast_days >= 2 means a SPECIFIC future day was asked about
+            # (weather_service treats forecast_days=2 as "today + tomorrow").
+            # Previously this branch was unreachable: the "currently" fallback
+            # below always fires because temp/humidity/feels_like are populated
+            # from CURRENT conditions regardless of what day was requested — so
+            # "what's tomorrow's weather" was silently answered with today's.
+            if forecast_days == 2 and len(daily) >= 2:
+                tomorrow = daily[-1]
+                hi = tomorrow.get("high", "N/A").replace("°C", " degrees").replace("°F", " degrees")
+                lo = tomorrow.get("low", "N/A").replace("°C", " degrees").replace("°F", " degrees")
+                cond = tomorrow.get("condition", "unspecified conditions").lower()
+                return f"Tomorrow in {loc}: expect {cond}, with a high of {hi} and a low of {lo}."
+
+            if forecast_days >= 3 and daily:
+                # A multi-day forecast was asked for — weather_service already
+                # built a correct day-by-day summary; template narration adds
+                # nothing here, so fall through to it via LLM/summary below.
+                return summary or f"Here is the forecast for {loc}."
+
+            # Data keys: location, temperature, feels_like, humidity, windspeed, condition
             temp = data.get("temperature", "").replace("°C", " degrees").replace("°F", " degrees")
             cond = data.get("condition", "unspecified conditions").lower()
             feels = data.get("feels_like", "").replace("°C", " degrees").replace("°F", " degrees")
             hum = data.get("humidity", "N/A")
-            
+
             # Speak numbers nicely (e.g. 45% -> forty five percent)
             hum_spoken = hum.replace("%", " percent")
-            
+
             if temp and hum != "N/A" and feels != "N/A":
                 return f"Currently in {loc}: it is {cond}, {temp}, with a humidity of {hum_spoken}."
             return summary or f"The weather in {loc} is currently {cond} at {temp}."
